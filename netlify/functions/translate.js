@@ -1,5 +1,5 @@
 // netlify/functions/translate.js
-// Netlify serverless function for DeepL translation
+// Netlify serverless function for Azure Translator API
 
 exports.handler = async (event, context) => {
     // Only allow POST requests
@@ -18,17 +18,20 @@ exports.handler = async (event, context) => {
         // Parse request body
         const { texts, sourceLang, targetLang } = JSON.parse(event.body);
         
-        // Get API key from environment variable
-        const apiKey = process.env.DEEPL_API_KEY;
+        // Get API credentials from environment variables
+        const apiKey = process.env.AZURE_TRANSLATOR_KEY;
+        const region = process.env.AZURE_TRANSLATOR_REGION;
         
-        if (!apiKey) {
+        if (!apiKey || !region) {
             return {
                 statusCode: 500,
                 headers: {
                     'Content-Type': 'application/json',
                     'Access-Control-Allow-Origin': '*',
                 },
-                body: JSON.stringify({ error: 'API key not configured on server' })
+                body: JSON.stringify({ 
+                    error: 'Azure Translator credentials not configured on server. Please add AZURE_TRANSLATOR_KEY and AZURE_TRANSLATOR_REGION environment variables.' 
+                })
             };
         }
 
@@ -53,39 +56,33 @@ exports.handler = async (event, context) => {
                 body: JSON.stringify({ error: 'targetLang is required' })
             };
         }
-        if (!apiKey) {
-            return {
-                statusCode: 400,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
-                body: JSON.stringify({ error: 'apiKey is required' })
-            };
-        }
 
-        // Determine API endpoint based on key type
-        const isFreeKey = apiKey.endsWith(':fx');
-        const apiUrl = isFreeKey 
-            ? 'https://api-free.deepl.com/v2/translate'
-            : 'https://api.deepl.com/v2/translate';
-
-        // Build request body
-        const params = new URLSearchParams();
-        texts.forEach(text => params.append('text', text));
-        params.append('target_lang', targetLang);
+        // Azure Translator API endpoint
+        const endpoint = 'https://api.cognitive.microsofttranslator.com';
+        
+        // Build query parameters
+        const params = new URLSearchParams({
+            'api-version': '3.0',
+            'to': targetLang
+        });
+        
+        // Add source language if specified (otherwise Azure auto-detects)
         if (sourceLang) {
-            params.append('source_lang', sourceLang);
+            params.append('from', sourceLang);
         }
 
-        // Call DeepL API using built-in fetch
-        const response = await fetch(apiUrl, {
+        // Prepare request body - Azure expects array of objects with 'text' property
+        const requestBody = texts.map(text => ({ text: text }));
+
+        // Call Azure Translator API
+        const response = await fetch(`${endpoint}/translate?${params.toString()}`, {
             method: 'POST',
             headers: {
-                'Authorization': `DeepL-Auth-Key ${apiKey}`,
-                'Content-Type': 'application/x-www-form-urlencoded',
+                'Ocp-Apim-Subscription-Key': apiKey,
+                'Ocp-Apim-Subscription-Region': region,
+                'Content-Type': 'application/json'
             },
-            body: params.toString()
+            body: JSON.stringify(requestBody)
         });
 
         if (!response.ok) {
@@ -97,12 +94,19 @@ exports.handler = async (event, context) => {
                     'Access-Control-Allow-Origin': '*',
                 },
                 body: JSON.stringify({
-                    error: errorData.message || `DeepL API error: ${response.status}`
+                    error: errorData.error?.message || `Azure Translator API error: ${response.status}`
                 })
             };
         }
 
         const data = await response.json();
+        
+        // Azure returns array of translation results
+        // Format: [{ translations: [{ text: "translated", to: "es" }] }]
+        // Convert to match our expected format: { translations: [{ text: "..." }] }
+        const translations = data.map(item => ({
+            text: item.translations[0].text
+        }));
 
         return {
             statusCode: 200,
@@ -112,7 +116,7 @@ exports.handler = async (event, context) => {
                 'Access-Control-Allow-Headers': 'Content-Type',
                 'Access-Control-Allow-Methods': 'POST, OPTIONS'
             },
-            body: JSON.stringify(data)
+            body: JSON.stringify({ translations })
         };
 
     } catch (error) {
