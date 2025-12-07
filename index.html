@@ -385,7 +385,7 @@
     
     <script>__loadEntry()</script>
 
-     <script>
+    <script>
         // Configuration constants
         const CONFIG = {
             MAX_CACHE_SIZE: 1000,
@@ -414,8 +414,7 @@
             resetBtn: document.getElementById('reset-btn'),
             statusSpan: document.getElementById('status'),
             contentDiv: document.getElementById('main-content') || document.body,
-            toolbarDiv: document.getElementById('translation-toolbar'),
-            noticeBanner: document.getElementById('translation-notice')
+            toolbarDiv: document.getElementById('translation-toolbar')
         };
 
         // Utility functions
@@ -573,24 +572,18 @@
                 while (node = walker.nextNode()) {
                     const text = node.textContent.trim();
                     
-                    // Store original node content before any changes
-                    if (!state.translatedNodes.has(node)) {
-                        state.translatedNodes.set(node, {
-                            originalText: node.textContent,
-                            parentElement: node.parentElement,
-                            nextSibling: node.nextSibling
-                        });
-                    }
-                    
                     // Check cache first
                     if (state.translationCache.has(text)) {
-                        const cached = state.translationCache.get(text);
-                        const preserved = utils.preserveWhitespace(node.textContent, cached);
-                        // Only update if text actually changed
-                        if (node.textContent !== preserved) {
-                            node.textContent = preserved;
+                        if (!state.translatedNodes.has(node)) {
+                            state.translatedNodes.set(node, node.textContent);
                         }
+                        const cached = state.translationCache.get(text);
+                        node.textContent = utils.preserveWhitespace(node.textContent, cached);
                     } else {
+                        if (!state.translatedNodes.has(node)) {
+                            state.translatedNodes.set(node, node.textContent);
+                        }
+                        
                         textNodes.push({
                             node: node,
                             text: text,
@@ -617,19 +610,12 @@
                         const text = node.textContent.trim();
                         if (text) {
                             if (!state.translatedNodes.has(node)) {
-                                state.translatedNodes.set(node, {
-                                    originalText: node.textContent,
-                                    parentElement: node.parentElement,
-                                    nextSibling: node.nextSibling
-                                });
+                                state.translatedNodes.set(node, node.textContent);
                             }
 
                             if (state.translationCache.has(text)) {
                                 const cached = state.translationCache.get(text);
-                                const preserved = utils.preserveWhitespace(node.textContent, cached);
-                                if (node.textContent !== preserved) {
-                                    node.textContent = preserved;
-                                }
+                                node.textContent = utils.preserveWhitespace(node.textContent, cached);
                             } else {
                                 newTextNodes.push({
                                     node: node,
@@ -661,12 +647,7 @@
                                 item.originalContent || item.node.textContent,
                                 translations[index]
                             );
-                            
-                            // Only update if the text actually changed
-                            if (item.node.textContent !== translated) {
-                                // Use data property to avoid triggering mutation observer
-                                item.node.data = translated;
-                            }
+                            item.node.textContent = translated;
                             
                             // Cache the translation
                             state.translationCache.set(item.text, translations[index]);
@@ -755,11 +736,6 @@
                 try {
                     await translator.translatePage(null, targetLang);
                     utils.updateStatus('Translation active - new content will auto-translate', 'success');
-                    
-                    // Show translation notice banner
-                    elements.noticeBanner.classList.add('active');
-                    document.body.classList.add('translated');
-                    
                     contentObserver.start();
                 } catch (error) {
                     utils.updateStatus(`Error: ${error.message}`, 'error');
@@ -772,24 +748,15 @@
 
             handleReset() {
                 // Restore original text for each translated node
-                state.translatedNodes.forEach((nodeData, node) => {
+                state.translatedNodes.forEach((originalText, node) => {
                     if (node.parentNode) {
-                        // Restore using the data property for text nodes
-                        if (node.nodeType === Node.TEXT_NODE) {
-                            node.data = nodeData.originalText;
-                        } else {
-                            node.textContent = nodeData.originalText;
-                        }
+                        node.textContent = originalText;
                     }
                 });
                 
                 state.translatedNodes.clear();
                 state.translationCache.clear();
                 state.isTranslating = false;
-                
-                // Hide translation notice banner
-                elements.noticeBanner.classList.remove('active');
-                document.body.classList.remove('translated');
                 
                 contentObserver.stop();
                 
